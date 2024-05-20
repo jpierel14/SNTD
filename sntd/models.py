@@ -7,10 +7,6 @@ from sncosmo.utils import integration_grid
 from sncosmo.constants import HC_ERG_AA, MODEL_BANDFLUX_SPACING
 from scipy.stats import exponnorm
 from collections import Counter
-try:
-	import bayesn
-except:
-	print('no bayesn model')
 import scipy
 
 __all__ = ['unresolvedMISN','BAYESNSource']
@@ -19,55 +15,140 @@ __all__ = ['unresolvedMISN','BAYESNSource']
 import os
 from astropy.table import Table
 class BAYESNSource(sncosmo.SALT2Source):
-    _param_names = ['amplitude', 'theta', 'AV','RV']
-    param_names_latex = ['amplitude', r'\theta', 'A_V','R_V']
-    def __init__(self, modeldir=os.path.join(os.path.dirname(os.path.realpath(__file__)),
-    							'data','sncosmo','bayesn_sncosmo'),
-                 m0file='bayesn_template_0.dat',
-                 m1file='bayesn_template_1.dat',
-                 clfile='bayesn_color_correction.dat',
-                 name=None, version=None):
+	_param_names = ['amplitude', 'theta', 'AV','RV']
+	param_names_latex = ['amplitude', r'\theta', 'A_V','R_V']
+	def __init__(self, modeldir=os.path.join(os.path.dirname(os.path.realpath(__file__)),
+								'data','sncosmo','bayesn_sncosmo_85'),
+				 m0file='bayesn_template_0.dat',
+				 m1file='bayesn_template_1.dat',
+				 clfile='bayesn_color_correction.dat',
+				 epsfile='bayesn_epsilon.dat',
+				 name=None, version=None):
 
-        self.name = name
-        self.version = version
-        self._model = {}
-        self._parameters = np.array([1., 0., 0.,3.1])
+		self.name = name
+		self.version = version
+		self._model = {}
+		self._parameters = np.array([1., 0., 0.,3.1])
 
-        names_or_objs = {'M0': m0file, 'M1': m1file,
-                         'clfile': clfile}
+		names_or_objs = {'M0': m0file, 'M1': m1file,
+						 'clfile': clfile,'epsilon':epsfile}
 
-        # Make filenames into full paths.
-        if modeldir is not None:
-            for k in names_or_objs:
-                v = names_or_objs[k]
-                if (v is not None and isinstance(v, str)):
-                    names_or_objs[k] = os.path.join(modeldir, v)
+		# Make filenames into full paths.
+		if modeldir is not None:
+			for k in names_or_objs:
+				v = names_or_objs[k]
+				if (v is not None and isinstance(v, str)):
+					names_or_objs[k] = os.path.join(modeldir, v)
 
-        # model components are interpolated to 2nd order
-        for key in ['M0', 'M1']:
-            phase, wave, values = sncosmo.read_griddata_ascii(names_or_objs[key])
-            self._model[key] = sncosmo.salt2utils.BicubicInterpolator(phase, wave, values)
-            # The "native" phases and wavelengths of the model are those
-            # of the first model component.
-            if key == 'M0':
-                self._phase = phase
-                self._wave = wave
+		# model components are interpolated to 2nd order
+		for key in ['M0', 'M1','epsilon','clfile']:
+			phase, wave, values = sncosmo.read_griddata_ascii(names_or_objs[key])
+			if key!='clfile':
+				self._model[key] = sncosmo.salt2utils.BicubicInterpolator(phase, wave, values)
+			else:
+				self._colorlaw = sncosmo.salt2utils.BicubicInterpolator(phase, wave, values)
+			# The "native" phases and wavelengths of the model are those
+			# of the first model component.
+			if key == 'M0':
+				self._phase = phase
+				self._wave = wave
 
 
-        # Set the colorlaw based on the "color correction" file.
-        #self._set_colorlaw_from_file(names_or_objs['clfile'])
+		# Set the colorlaw based on the "color correction" file.
+		#self._set_colorlaw_from_file(names_or_objs['clfile'])
 
-        # Set the color dispersion from "color_dispersion" file
-        #w, val = np.loadtxt(names_or_objs['cdfile'], unpack=True)
-        #self._colordisp = Spline1d(w, val,  k=1)  # linear interp.
-        colorlaw_tab = Table.read(os.path.join(modeldir,clfile),format='ascii')
-        self._colorlaw = scipy.interpolate.interp1d(colorlaw_tab['col0'],colorlaw_tab['col1'],
-                                                   bounds_error=False,fill_value='extrapolate')
-    def _flux(self, phase, wave):
-        m0 = self._model['M0'](phase, wave)
-        m1 = self._model['M1'](phase, wave)
-        return (self._parameters[0] * (m0 * 10**(-.4*(self._parameters[1] * m1))) *
-                10. ** (-0.4 * self._colorlaw(wave) * self._parameters[2]))
+		# Set the color dispersion from "color_dispersion" file
+		#w, val = np.loadtxt(names_or_objs['cdfile'], unpack=True)
+		#self._colordisp = Spline1d(w, val,  k=1)  # linear interp.
+		#colorlaw_tab = Table.read(os.path.join(modeldir,clfile),format='ascii')
+		#self._colorlaw = scipy.interpolate.interp1d(colorlaw_tab['col0'],colorlaw_tab['col1'],
+		#										   bounds_error=False,fill_value='extrapolate')
+	def _flux(self, phase, wave):
+		m0 = self._model['M0'](phase, wave)
+		m1 = self._model['M1'](phase, wave)
+		#return (self._parameters[0] * (m0 * 10**(-.4*(self._parameters[1] * m1))) *
+		#		10. ** (-0.4 * self._colorlaw(wave) * self._parameters[2]))
+		return (self._parameters[0] * (m0 * 10**(-.4*(self._parameters[1] * m1))) *
+				10. ** (-0.4 * (self._colorlaw(self._parameters[3],wave).flatten() * self._parameters[2])))
+
+	def _bandflux_rvar_single(self, band, phase):
+		"""Model relative variance for a single bandpass."""
+
+		# Raise an exception if bandpass is out of model range.
+		if (band.minwave() < self._wave[0] or band.maxwave() > self._wave[-1]):
+			raise ValueError('bandpass {0!r:s} [{1:.6g}, .., {2:.6g}] '
+							 'outside spectral range [{3:.6g}, .., {4:.6g}]'
+							 .format(band.name, band.wave[0], band.wave[-1],
+									 self._wave[0], self._wave[-1]))
+
+		x0 = self._parameters[0]
+		x1 = self._parameters[1]
+
+		# integrate m0 and m1 components
+		wave, dwave = integration_grid(band.minwave(), band.maxwave(),
+									   MODEL_BANDFLUX_SPACING)
+		trans = band(wave)
+		m0 = self._model['M0'](phase, wave)
+		m1 = self._model['M1'](phase, wave)
+		tmp = trans * wave
+		ftot = np.sum(x0*m0*10**(-.4*(x1*m1)) * tmp, axis=1) * dwave / HC_ERG_AA
+		#m1int = np.sum( * tmp, axis=1) * dwave / HC_ERG_AA
+		#ftot = x0*(f0*10**(-.4*(x1 * m1int)))
+		#print(x0,f0,x1,f0,m1int,np.max(m1))
+		#print(np.max(ftot))
+		# In the following, the "[:,0]" reduces from a 2-d array of shape
+		# (nphase, 1) to a 1-d array.
+		eps = self._model['epsilon'](phase, wave)
+		v = (np.sum(x0*m0*10**(-.4*(x1*m1))*(eps)*tmp,axis=1)*dwave/HC_ERG_AA)
+		#v = v 
+		
+		# v is supposed to be variance but can go negative
+		# due to interpolation.  Correct negative values to some small
+		# number. (at present, use prescription of snfit : set
+		# negatives to 0.0001)
+		v[v < 0.0] = 0.0001
+
+		# avoid warnings due to evaluating 0. / 0. in f0 / ftot
+		with np.errstate(invalid='ignore'):
+			result = (v**2)/(ftot**2)#	(v*ftot)**2
+		
+		# treat cases where ftot is negative the same as snfit
+		#result[ftot <= 0.0] = 10000.
+		return result
+
+	def bandflux_rcov(self, band, phase):
+		"""Return the *relative* model covariance (or "model error") on
+		synthetic photometry generated from the model in the given restframe
+		band(s).
+
+		This model covariance represents the scatter of real SNe about
+		the model.  The covariance matrix has two components. The
+		first component is diagonal (pure variance) and depends on the
+		phase :math:`t` and bandpass central wavelength
+		:math:`\\lambda_c` of each photometry point:
+
+		Parameters
+		----------
+		band : `~numpy.ndarray` of `~sncosmo.Bandpass`
+			Bandpasses of observations.
+		phase : `~numpy.ndarray` (float)
+			Phases of observations.
+
+
+		Returns
+		-------
+		rcov : `~numpy.ndarray`
+			Model relative covariance for given bandpasses and phases.
+		"""
+
+		# construct covariance array with relative variance on diagonal
+		diagonal = np.zeros(phase.shape, dtype=np.float64)
+		for b in set(band):
+			mask = band == b
+			diagonal[mask] = self._bandflux_rvar_single(b, phase[mask])
+		result = np.diagflat(diagonal)
+
+		return result
 
 class unresolvedSource(sncosmo.Source):
 	def __init__(self, model_list):

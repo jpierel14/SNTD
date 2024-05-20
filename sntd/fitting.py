@@ -1467,7 +1467,7 @@ def nest_color_lc(data, model, nimage, colors, vparam_names, bounds, ref='image_
 		d = {}
 		for i in range(npdim):
 			d[iparam_names[i]] = ppflist[i](u[i])
-		v = np.empty(ndim, dtype=np.float)
+		v = np.empty(ndim, dtype=float)
 		for i in range(ndim):
 			key = vparam_names[i]
 			if key in d:
@@ -2689,7 +2689,7 @@ def nest_series_lc(data, model, nimage, vparam_names, bounds, ref='image_1', use
 		d = {}
 		for i in range(npdim):
 			d[iparam_names[i]] = ppflist[i](u[i])
-		v = np.empty(ndim, dtype=np.float)
+		v = np.empty(ndim, dtype=float)
 		for i in range(ndim):
 			key = vparam_names[i]
 			if key in d:
@@ -3596,7 +3596,7 @@ def nest_parallel_lc(data, model, prev_res, bounds, guess_amplitude_bound=False,
 		d = {}
 		for i in range(npdim):
 			d[iparam_names[i]] = ppflist[i](u[i])
-		v = np.empty(ndim, dtype=np.float)
+		v = np.empty(ndim, dtype=float)
 		for i in range(ndim):
 			key = vparam_names[i]
 			if key in d:
