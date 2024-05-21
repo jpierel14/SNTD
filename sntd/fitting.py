@@ -3643,13 +3643,55 @@ def nest_parallel_lc(data, model, prev_res, bounds, guess_amplitude_bound=False,
 		chisq = chisq_likelihood(parameters)
 		return(prior_val-.5*chisq)
 
-	res = nestle.sample(loglike, prior_transform, ndim, npdim=npdim,
+
+
+	use_dynesty=True
+	
+
+	if use_dynesty:
+		import dynesty
+		import multiprocessing
+		from dynesty import utils as dyfunc
+		#pool = MPIPool()
+		with dynesty.pool.Pool(10, loglike, prior_transform) as pool:
+		    sampler = dynesty.NestedSampler(pool.loglike, pool.prior_transform,
+		                            ndim, pool = pool)
+		    sampler.run_nested(maxiter=maxiter,
+						maxcall=maxcall)
+		#sampler = dynesty.NestedSampler(loglike, prior_transform, ndim, nlive = npoints)
+		#sampler.run_nested(maxiter=maxiter,
+		#				maxcall=maxcall)
+		res = sampler.results
+		samples = res.samples  # samples
+		weights = res.importance_weights()
+
+		# Compute weighted mean and covariance.
+		vparameters, cov = dyfunc.mean_and_cov(samples, weights)
+
+		
+		res = sncosmo.utils.Result(niter=res.niter,
+							   ncall=res.ncall,
+							   logz=np.max(res.logz),
+							   logzerr=res.logzerr,
+							   #h=res.h,
+							   samples=res.samples,
+							   weights=weights,
+							   logvol=res.logvol,
+							   logl=res.logl,
+							   errors=OrderedDict(zip(vparam_names,
+													  np.sqrt(np.diagonal(cov)))),
+							   vparam_names=copy(vparam_names),
+							   bounds=bounds,
+							   dynasty_res=res)
+	else:
+		res = nestle.sample(loglike, prior_transform, ndim, npdim=npdim,
 						npoints=npoints, method=method, maxiter=maxiter,
 						maxcall=maxcall, rstate=rstate,
 						callback=(nestle.print_progress if verbose else None))
-	vparameters, cov = nestle.mean_and_cov(res.samples, res.weights)
 
-	res = sncosmo.utils.Result(niter=res.niter,
+		vparameters, cov = nestle.mean_and_cov(res.samples, res.weights)
+
+		res = sncosmo.utils.Result(niter=res.niter,
 							   ncall=res.ncall,
 							   logz=res.logz,
 							   logzerr=res.logzerr,
@@ -3662,6 +3704,7 @@ def nest_parallel_lc(data, model, prev_res, bounds, guess_amplitude_bound=False,
 													  np.sqrt(np.diagonal(cov)))),
 							   vparam_names=copy(vparam_names),
 							   bounds=bounds)
+
 
 	if use_MLE:
 		best_ind = res.logl.argmax()
