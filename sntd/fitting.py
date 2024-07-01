@@ -3657,7 +3657,7 @@ def nest_parallel_lc(data, model, prev_res, bounds, guess_amplitude_bound=False,
 		    sampler = dynesty.NestedSampler(pool.loglike, pool.prior_transform,
 		                            ndim, pool = pool)
 		    sampler.run_nested(maxiter=maxiter,
-						maxcall=maxcall)
+						maxcall=maxcall,print_progress=True)
 		#sampler = dynesty.NestedSampler(loglike, prior_transform, ndim, nlive = npoints)
 		#sampler.run_nested(maxiter=maxiter,
 		#				maxcall=maxcall)
